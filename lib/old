@@ -1,0 +1,284 @@
+// import 'package:flutter/material.dart';
+// import 'package:flutter_localizations/flutter_localizations.dart';
+// import 'package:mqtt_client/mqtt_client.dart';
+// import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+// import 'dart:convert'; // لتحويل النصوص إلى UTF-8
+// import 'package:flutter_background_service/flutter_background_service.dart';
+// import 'package:mqtt_client/mqtt_server_client.dart';
+// import 'dart:io'; // Platform checks
+
+// void main() {
+//   runApp(MyApp());
+// }
+
+// class MyApp extends StatelessWidget {
+//   @override
+//   Widget build(BuildContext context) {
+//     return MaterialApp(
+//       locale: Locale('ar', 'EG'), // تعيين اللغة العربية
+//       supportedLocales: [
+//         Locale('en', 'US'),
+//         Locale('ar', 'EG'),
+//       ],
+//       localizationsDelegates: [
+//         GlobalMaterialLocalizations.delegate,
+//         GlobalWidgetsLocalizations.delegate,
+//         GlobalCupertinoLocalizations.delegate,
+//       ],
+//       home: MQTTPage(),
+//     );
+//   }
+// }
+
+// class MQTTPage extends StatefulWidget {
+//   @override
+//   _MQTTPageState createState() => _MQTTPageState();
+// }
+
+// class _MQTTPageState extends State<MQTTPage> {
+//   MqttServerClient? client;
+//   MqttConnectionState? connectionState;
+//   final List<String> messages = [];
+//   final TextEditingController _textController = TextEditingController();
+//   String _messageToSend = '';
+//   FlutterLocalNotificationsPlugin? flutterLocalNotificationsPlugin;
+
+//   @override
+//   void initState() {
+//     super.initState();
+//     _initializeNotifications();
+//     _requestNotificationPermission();
+//     _connectToMQTT();
+
+//     _initializeBackgroundService();
+//   }
+
+//   Future<void> _requestNotificationPermission() async {
+//     if (Platform.isIOS) {
+//       final bool? granted = await flutterLocalNotificationsPlugin!
+//           .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
+//           ?.requestPermissions(
+//             alert: true,
+//             badge: true,
+//             sound: true,
+//           );
+//       if (granted != null && granted) {
+//         print("Notification permission granted");
+//       } else {
+//         print("Notification permission denied");
+//       }
+//     } else {
+//       // No explicit permission required for Android, it's handled automatically
+//       print("No need for explicit permission on Android");
+//     }
+//   }
+
+//   // تهيئة إعدادات الإشعارات
+//   Future<void> _initializeNotifications() async {
+//     flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+//     const initializationSettingsAndroid =
+//         AndroidInitializationSettings('@mipmap/ic_launcher');
+//     const initializationSettings = InitializationSettings(
+//       android: initializationSettingsAndroid,
+//     );
+//     await flutterLocalNotificationsPlugin!.initialize(initializationSettings);
+//     await flutterLocalNotificationsPlugin!.show(
+//         0,
+//         'Background Notification',
+//         'This is a background notification.',
+//         const NotificationDetails(
+//             android: AndroidNotificationDetails(
+//           'background_channel',
+//           'Background Notifications',
+//           importance: Importance.max,
+//           priority: Priority.high,
+//         )));
+//     onConnected();
+//   }
+
+//   // الاتصال بخادم MQTT
+//   Future<void> _connectToMQTT() async {
+//     client = MqttServerClient('wss.busatyapp.com', 'flutter_client');
+//     client!.port = 1883;
+//     client!.keepAlivePeriod = 60;
+//     client!.onConnected = onConnected;
+//     client!.onDisconnected = onDisconnected;
+//     client!.onSubscribed = onSubscribed;
+
+//     client!.setProtocolV311();
+
+//     try {
+//       await client!.connect('ashraf', 'ashraf');
+//       connectionState = client!.connectionState;
+//       print('Connected to MQTT: $connectionState');
+//       _subscribeToTopic('test/topic');
+//     } catch (e) {
+//       print('Connection failed: $e');
+//       _showNotification(
+//           'Connection failed', 'Could not connect to MQTT server');
+//     }
+//   }
+
+//   // الاشتراك في الموضوع
+//   Future<void> _subscribeToTopic(String topic) async {
+//     if (connectionState == MqttConnectionState.connected) {
+//       client!.subscribe(topic, MqttQos.atMostOnce);
+//       client!.updates!.listen((List<MqttReceivedMessage> c) {
+//         final message = c[0].payload as MqttPublishMessage;
+//         final payload =
+//             MqttPublishPayload.bytesToStringAsString(message.payload.message);
+//         setState(() {
+//           messages.add(utf8.decode(payload.codeUnits)); // فك الترميز بشكل صحيح
+//         });
+//         _showNotification('New Message',
+//             utf8.decode(payload.codeUnits)); // إشعار عند وصول رسالة جديدة
+//       });
+//       print('Subscribed to topic: $topic');
+//     } else {
+//       print('Not connected, cannot subscribe');
+//     }
+//   }
+
+//   // إرسال رسالة
+//   Future<void> _sendMessage() async {
+//     if (_messageToSend.isNotEmpty &&
+//         connectionState == MqttConnectionState.connected) {
+//       final MqttClientPayloadBuilder builder = MqttClientPayloadBuilder();
+//       builder.addString(_messageToSend);
+//       client!
+//           .publishMessage('test/topic', MqttQos.atMostOnce, builder.payload!);
+//       _textController.clear();
+//       setState(() {
+//         _messageToSend = '';
+//       });
+//       print('Message sent: $_messageToSend');
+//     }
+//   }
+
+//   // عندما يتم الاتصال بنجاح
+//   void onConnected() {
+//     print('Connected successfully');
+//     _showNotification('Connected', 'Successfully connected to the MQTT server');
+//   }
+
+//   // عندما يتم قطع الاتصال
+//   void onDisconnected() {
+//     print('Disconnected');
+//     _showNotification('Disconnected', 'Disconnected from the MQTT server');
+//   }
+
+//   // عندما يتم الاشتراك في الموضوع
+//   void onSubscribed(String topic) {
+//     print('Subscribed to topic: $topic');
+//   }
+
+//   // إظهار إشعار
+//   Future<void> _showNotification(String title, String body) async {
+//     const notificationDetails = NotificationDetails(
+//       android: AndroidNotificationDetails(
+//         'your_channel_id',
+//         'your_channel_name',
+//         importance: Importance.max,
+//         priority: Priority.high,
+//       ),
+//     );
+
+//     await flutterLocalNotificationsPlugin!.show(
+//       0,
+//       title,
+//       body,
+//       notificationDetails,
+//     );
+//   }
+
+//   void _initializeBackgroundService() {
+//     FlutterBackgroundService().configure(
+//       androidConfiguration: AndroidConfiguration(
+//         onStart:
+//             onBackgroundServiceStarted, // Pass the function with ServiceInstance
+//         isForegroundMode: true,
+//         autoStart: true,
+//         autoStartOnBoot: true,
+//       ),
+//       iosConfiguration: IosConfiguration(),
+//     );
+//     FlutterBackgroundService().startService();
+//     onConnected();
+//   }
+
+//   // Corrected onBackgroundServiceStarted function with ServiceInstance parameter
+//   void onBackgroundServiceStarted(ServiceInstance service) {
+//     print("Background service started");
+//     service.invoke(
+//         "setAsBackground"); // You can interact with the service instance here if needed
+
+//     onConnected();
+//   }
+
+//   @override
+//   void dispose() {
+//     client?.disconnect();
+//     FlutterBackgroundService().invoke("stopService");
+//     super.dispose();
+//   }
+
+//   @override
+//   Widget build(BuildContext context) {
+//     return Scaffold(
+//       appBar: AppBar(
+//         title: Text('MQTT Messages'),
+//       ),
+//       body: Directionality(
+//         textDirection:
+//             TextDirection.rtl, // التأكد من عرض النصوص من اليمين لليسار
+//         child: Column(
+//           children: [
+//             Expanded(
+//               child: ListView.builder(
+//                 itemCount: messages.length,
+//                 itemBuilder: (context, index) {
+//                   return ListTile(
+//                     title: Container(
+//                       height: 50,
+//                       color: Colors.red,
+//                       child: Text(
+//                         messages[index],
+//                         style: TextStyle(color: Colors.white),
+//                       ),
+//                     ),
+//                   );
+//                 },
+//               ),
+//             ),
+//             Padding(
+//               padding: const EdgeInsets.all(8.0),
+//               child: Row(
+//                 children: [
+//                   Expanded(
+//                     child: TextField(
+//                       controller: _textController,
+//                       onChanged: (value) {
+//                         setState(() {
+//                           _messageToSend = value;
+//                         });
+//                       },
+//                       decoration: InputDecoration(
+//                         hintText: 'أدخل الرسالة',
+//                         border: OutlineInputBorder(),
+//                       ),
+//                     ),
+//                   ),
+//                   IconButton(
+//                     icon: Icon(Icons.send),
+//                     onPressed: _sendMessage,
+//                   ),
+//                 ],
+//               ),
+//             ),
+//           ],
+//         ),
+//       ),
+//     );
+//   }
+// }
